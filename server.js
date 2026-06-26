@@ -99,10 +99,12 @@ ${message}
 });
 
 // CAREER ROUTE
+// CAREER ROUTE
 app.post("/career", upload.single("resume"), async (req, res) => {
   try {
-    console.log("Body:", req.body);
-    console.log("File:", req.file);
+    console.log("========== CAREER REQUEST ==========");
+    console.log("BODY:", req.body);
+    console.log("FILE:", req.file);
 
     const {
       name,
@@ -121,14 +123,28 @@ app.post("/career", upload.single("resume"), async (req, res) => {
       !phone ||
       !position ||
       !qualification ||
-      !passingYear ||
-      !req.file
+      !passingYear
     ) {
+      console.log("❌ Missing fields");
+
       return res.status(400).json({
         success: false,
-        error: "All fields including resume are required.",
+        error: "Required fields missing.",
       });
     }
+
+    if (!req.file) {
+      console.log("❌ Resume not received.");
+
+      return res.status(400).json({
+        success: false,
+        error: "Resume file not received.",
+      });
+    }
+
+    console.log("✅ Preparing email...");
+    console.log("Filename:", req.file.originalname);
+    console.log("Size:", req.file.size);
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -154,18 +170,24 @@ ${message}
       ],
     };
 
+    console.log("📧 Sending email...");
+
     const info = await transporter.sendMail(mailOptions);
 
-    console.log("✅ Career email sent:", info.response);
+    console.log("✅ Email sent:", info.response);
 
-    res.json({
+    return res.json({
       success: true,
       message: "Application submitted successfully.",
     });
   } catch (error) {
-    logEmailError(error, "CAREER");
+    console.error("========== CAREER ERROR ==========");
+    console.error(error);
+    console.error("Message:", error.message);
+    console.error("Code:", error.code);
+    console.error("Stack:", error.stack);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error.message,
     });
