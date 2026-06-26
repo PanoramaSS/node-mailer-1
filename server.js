@@ -1,40 +1,36 @@
 require("dotenv").config();
+
 const express = require("express");
 const nodemailer = require("nodemailer");
 const cors = require("cors");
 const multer = require("multer");
-const fs = require("fs");
 
 const app = express();
-const PORT = 8000;
+const PORT = process.env.PORT || 8000;
 
 // Middleware
 app.use(
   cors({
-    origin: "http://localhost:3000", // Update with your frontend prod URL
+    origin: [
+      "http://localhost:3000",
+      "https://panoramasoftwares.com",
+    ],
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-app.options("*", cors());
 
 app.use(express.json());
 
-// Multer setup for file upload (Career form)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = "./uploads";
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + "-" + file.originalname;
-    cb(null, uniqueName);
+// Multer memory storage (recommended for Render)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB
   },
 });
-const upload = multer({ storage });
 
-// Nodemailer transporter configuration for Gmail
+// Nodemailer transporter
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
@@ -43,133 +39,171 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Helper function for detailed error logging
-function logEmailError(error, routeName) {
-  console.error(`❌ Error sending email in [${routeName}]`);
-  console.error("Message:", error.message);
-  console.error("Code:", error.code);
-  console.error("Command:", error.command);
-  console.error("Stack:", error.stack);
-  try {
-    console.error("Full error object:", JSON.stringify(error, null, 2));
-  } catch {
-    console.error("Could not stringify error object");
-  }
-}
-
-// ----------- CONTACT FORM ROUTE -----------
-app.post("/contact", async (req, res) => {
-  const { name, email, mobile, subject, message } = req.body;
-
-  if (!name || !email || !subject || !mobile) {
-    return res
-      .status(400)
-      .json({ success: false, error: "All fields are required!" });
-  }
-
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: process.env.RECEIVER_EMAIL,
-    subject: `New Contact Form Submission: ${subject}`,
-    text: `You received a new message:\n\nName: ${name}\nEmail: ${email}\nMobile: ${mobile}\n\nMessage:\n${message}`,
-  };
-
-  try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log("✅ Contact email sent:", info.response);
-    res.json({ success: true, message: "Message sent successfully!" });
-  } catch (error) {
-    logEmailError(error, "CONTACT");
-    res.status(500).json({ success: false, error: "Failed to send message." });
+// Verify transporter on startup
+transporter.verify((error) => {
+  if (error) {
+    console.error("❌ Mail transporter error:", error);
+  } else {
+    console.log("✅ Mail server ready");
   }
 });
 
-// ----------- CAREER FORM ROUTE (with file upload) -----------
-app.post("/career", upload.single("resume"), async (req, res) => {
-  const {
-    name,
-    email,
-    phone,
-    position,
-    experience,
-    qualification,
-    passingYear,
-    message,
-  } = req.body;
+function logEmailError(error, routeName) {
+  console.error(`❌ Error in [${routeName}]`);
+  console.error("Message:", error.message);
+  console.error("Code:", error.code);
+  console.error("Command:", error.command);
+  console.error(error);
+}
 
-  if (
-    !name ||
-    !email ||
-    !phone ||
-    !position ||
-    !qualification ||
-    !passingYear ||
-    !req.file
-  ) {
+// CONTACT ROUTE
+app.post("/contact", async (req, res) => {
+  const { name, email, mobile, subject, message } = req.body;
+
+  if (!name || !email || !mobile || !subject) {
     return res.status(400).json({
       success: false,
-      error: "All required fields including resume must be provided!",
+      error: "All fields are required.",
     });
   }
 
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: process.env.RECEIVER_EMAIL,
-    subject: `New Career Application for: ${position}`,
-    text: `You received a new career application:\n\n
+  try {
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.RECEIVER_EMAIL,
+      subject: `New Contact Form: ${subject}`,
+      text: `
+Name: ${name}
+Email: ${email}
+Mobile: ${mobile}
+
+Message:
+${message}
+      `,
+    });
+
+    console.log("✅ Contact mail sent:", info.response);
+
+    res.json({
+      success: true,
+      message: "Message sent successfully.",
+    });
+  } catch (error) {
+    logEmailError(error, "CONTACT");
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// CAREER ROUTE
+app.post("/career", upload.single("resume"), async (req, res) => {
+  try {
+    console.log("Body:", req.body);
+    console.log("File:", req.file);
+
+    const {
+      name,
+      email,
+      phone,
+      position,
+      experience,
+      qualification,
+      passingYear,
+      message,
+    } = req.body;
+
+    if (
+      !name ||
+      !email ||
+      !phone ||
+      !position ||
+      !qualification ||
+      !passingYear ||
+      !req.file
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "All fields including resume are required.",
+      });
+    }
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: process.env.RECEIVER_EMAIL,
+      subject: `New Career Application: ${position}`,
+      text: `
 Name: ${name}
 Email: ${email}
 Phone: ${phone}
 Position: ${position}
 Experience: ${experience}
 Qualification: ${qualification}
-Year of Passing: ${passingYear}
-Message: ${message}
-    `,
-    attachments: [
-      {
-        filename: req.file.originalname,
-        path: req.file.path,
-      },
-    ],
-  };
+Passing Year: ${passingYear}
 
-  try {
+Message:
+${message}
+      `,
+      attachments: [
+        {
+          filename: req.file.originalname,
+          content: req.file.buffer,
+        },
+      ],
+    };
+
     const info = await transporter.sendMail(mailOptions);
-    console.log("✅ Career application email sent:", info.response);
+
+    console.log("✅ Career email sent:", info.response);
+
     res.json({
       success: true,
-      message: "Application submitted successfully!",
-    });
-
-    // Optional: Delete resume after sending
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error("Failed to delete resume:", err);
+      message: "Application submitted successfully.",
     });
   } catch (error) {
     logEmailError(error, "CAREER");
-    res.status(500).json({ success: false, error: "Failed to send application." });
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
   }
 });
 
-// Test route to debug quickly without forms
+// TEST ROUTE
 app.get("/email-test", async (req, res) => {
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: process.env.RECEIVER_EMAIL,
-    subject: "Test Email",
-    text: "This is a test email from /email-test endpoint.",
-  };
-
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log("✅ Test email sent:", info.response);
-    res.json({ success: true, message: "Test email sent successfully!" });
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.RECEIVER_EMAIL,
+      subject: "Test Email",
+      text: "This is a test email.",
+    });
+
+    console.log("✅ Test email:", info.response);
+
+    res.json({
+      success: true,
+      message: "Test email sent successfully.",
+    });
   } catch (error) {
     logEmailError(error, "EMAIL-TEST");
-    res.status(500).json({ success: false, error: "Failed to send test email." });
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
   }
 });
 
-// Start Server
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// Health check
+app.get("/", (req, res) => {
+  res.send("Server is running.");
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
