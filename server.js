@@ -1,14 +1,28 @@
 require("dotenv").config();
 
 const express = require("express");
-const nodemailer = require("nodemailer");
 const cors = require("cors");
 const multer = require("multer");
+const SibApiV3Sdk = require("sib-api-v3-sdk");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// Middleware
+// ====================
+// BREVO CONFIGURATION
+// ====================
+
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+
+const apiKey = defaultClient.authentications["api-key"];
+apiKey.apiKey = process.env.BREVO_API_KEY;
+
+const emailApi = new SibApiV3Sdk.TransactionalEmailsApi();
+
+// ====================
+// MIDDLEWARE
+// ====================
+
 app.use(
   cors({
     origin: [
@@ -22,67 +36,49 @@ app.use(
 
 app.use(express.json());
 
-// Multer memory storage (recommended for Render)
+// ====================
+// MULTER
+// ====================
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5 MB
+    fileSize: 5 * 1024 * 1024,
   },
 });
 
-console.log("EMAIL_USER:", process.env.EMAIL_USER);
-console.log("EMAIL_PASS:", process.env.EMAIL_PASS);
+console.log("Sender:", process.env.SENDER_EMAIL);
 
-// Nodemailer transporter
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  connectionTimeout: 30000,
-  greetingTimeout: 30000,
-  socketTimeout: 30000,
-  logger: true,
-  debug: true,
-});
-
-// Verify transporter on startup
-transporter.verify((error) => {
-  if (error) {
-    console.error("❌ Mail transporter error:", error);
-  } else {
-    console.log("✅ Mail server ready");
-  }
-});
-
-function logEmailError(error, routeName) {
-  console.error(`❌ Error in [${routeName}]`);
-  console.error("Message:", error.message);
-  console.error("Code:", error.code);
-  console.error("Command:", error.command);
-  console.error(error);
-}
-
+// ====================
 // CONTACT ROUTE
+// ====================
+
 app.post("/contact", async (req, res) => {
-  const { name, email, mobile, subject, message } = req.body;
-
-  if (!name || !email || !mobile || !subject) {
-    return res.status(400).json({
-      success: false,
-      error: "All fields are required.",
-    });
-  }
-
   try {
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.RECEIVER_EMAIL,
+    const { name, email, mobile, subject, message } = req.body;
+
+    if (!name || !email || !mobile || !subject) {
+      return res.status(400).json({
+        success: false,
+        error: "All fields are required.",
+      });
+    }
+
+    await emailApi.sendTransacEmail({
+      sender: {
+        email: process.env.SENDER_EMAIL,
+        name: process.env.SENDER_NAME,
+      },
+
+      to: process.env.RECEIVER_EMAIL
+        .split(",")
+        .map((email) => ({
+          email: email.trim(),
+        })),
+
       subject: `New Contact Form: ${subject}`,
-      text: `
+
+      textContent: `
 Name: ${name}
 Email: ${email}
 Mobile: ${mobile}
@@ -92,29 +88,31 @@ ${message}
       `,
     });
 
-    console.log("✅ Contact mail sent:", info.response);
+    console.log("✅ Contact email sent");
 
-    res.json({
+    return res.json({
       success: true,
       message: "Message sent successfully.",
     });
   } catch (error) {
-    logEmailError(error, "CONTACT");
+    console.error("CONTACT ERROR");
+    console.error(error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error.message,
     });
   }
 });
 
+// ====================
 // CAREER ROUTE
-// CAREER ROUTE
+// ====================
+
 app.post("/career", upload.single("resume"), async (req, res) => {
   try {
     console.log("========== CAREER REQUEST ==========");
-    console.log("BODY:", req.body);
-    console.log("FILE:", req.file);
+    console.log(req.body);
 
     const {
       name,
@@ -135,8 +133,6 @@ app.post("/career", upload.single("resume"), async (req, res) => {
       !qualification ||
       !passingYear
     ) {
-      console.log("❌ Missing fields");
-
       return res.status(400).json({
         success: false,
         error: "Required fields missing.",
@@ -144,23 +140,30 @@ app.post("/career", upload.single("resume"), async (req, res) => {
     }
 
     if (!req.file) {
-      console.log("❌ Resume not received.");
-
       return res.status(400).json({
         success: false,
         error: "Resume file not received.",
       });
     }
 
-    console.log("✅ Preparing email...");
     console.log("Filename:", req.file.originalname);
     console.log("Size:", req.file.size);
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.RECEIVER_EMAIL,
+    await emailApi.sendTransacEmail({
+      sender: {
+        email: process.env.SENDER_EMAIL,
+        name: process.env.SENDER_NAME,
+      },
+
+      to: process.env.RECEIVER_EMAIL
+        .split(",")
+        .map((email) => ({
+          email: email.trim(),
+        })),
+
       subject: `New Career Application: ${position}`,
-      text: `
+
+      textContent: `
 Name: ${name}
 Email: ${email}
 Phone: ${phone}
@@ -172,19 +175,16 @@ Passing Year: ${passingYear}
 Message:
 ${message}
       `,
-      attachments: [
+
+      attachment: [
         {
-          filename: req.file.originalname,
-          content: req.file.buffer,
+          name: req.file.originalname,
+          content: req.file.buffer.toString("base64"),
         },
       ],
-    };
+    });
 
-    console.log("📧 Sending email...");
-
-    const info = await transporter.sendMail(mailOptions);
-
-    console.log("✅ Email sent:", info.response);
+    console.log("✅ Career email sent");
 
     return res.json({
       success: true,
@@ -193,9 +193,6 @@ ${message}
   } catch (error) {
     console.error("========== CAREER ERROR ==========");
     console.error(error);
-    console.error("Message:", error.message);
-    console.error("Code:", error.code);
-    console.error("Stack:", error.stack);
 
     return res.status(500).json({
       success: false,
@@ -204,24 +201,35 @@ ${message}
   }
 });
 
+// ====================
 // TEST ROUTE
+// ====================
+
 app.get("/email-test", async (req, res) => {
   try {
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.RECEIVER_EMAIL,
-      subject: "Test Email",
-      text: "This is a test email.",
-    });
+    await emailApi.sendTransacEmail({
+      sender: {
+        email: process.env.SENDER_EMAIL,
+        name: process.env.SENDER_NAME,
+      },
 
-    console.log("✅ Test email:", info.response);
+      to: process.env.RECEIVER_EMAIL
+        .split(",")
+        .map((email) => ({
+          email: email.trim(),
+        })),
+
+      subject: "Brevo Test Email",
+
+      textContent: "Brevo integration is working.",
+    });
 
     res.json({
       success: true,
-      message: "Test email sent successfully.",
+      message: "Email sent successfully.",
     });
   } catch (error) {
-    logEmailError(error, "EMAIL-TEST");
+    console.error(error);
 
     res.status(500).json({
       success: false,
@@ -230,31 +238,18 @@ app.get("/email-test", async (req, res) => {
   }
 });
 
-app.get("/smtp-test", async (req, res) => {
-  try {
-    await transporter.verify();
+// ====================
+// HEALTH CHECK
+// ====================
 
-    res.json({
-      success: true,
-      message: "SMTP connected",
-    });
-  } catch (e) {
-    console.error(e);
-
-    res.status(500).json({
-      success: false,
-      error: e.message,
-      code: e.code,
-    });
-  }
-});
-
-// Health check
 app.get("/", (req, res) => {
   res.send("Server is running.");
 });
 
-// Start server
+// ====================
+// START SERVER
+// ====================
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

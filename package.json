@@ -15,7 +15,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "multer": "^2.0.2",
-    "nodemailer": "^6.10.0",
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.9",
+    "sib-api-v3-sdk": "^8.5.0"
   }
 }
