@@ -35,11 +35,16 @@ console.log("EMAIL_PASS:", process.env.EMAIL_PASS);
 
 // Nodemailer transporter
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
   logger: true,
   debug: true,
 });
@@ -221,6 +226,25 @@ app.get("/email-test", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+});
+
+app.get("/smtp-test", async (req, res) => {
+  try {
+    await transporter.verify();
+
+    res.json({
+      success: true,
+      message: "SMTP connected",
+    });
+  } catch (e) {
+    console.error(e);
+
+    res.status(500).json({
+      success: false,
+      error: e.message,
+      code: e.code,
     });
   }
 });
